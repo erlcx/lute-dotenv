@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  sync-version-and-notes:
+  validate-and-update-notes:
     runs-on: ubuntu-latest
 
     steps:
@@ -26,62 +26,44 @@ jobs:
 
             core.setOutput("tag", tag);
             core.setOutput("version", tag.slice(1));
-            core.setOutput("default_branch", context.payload.repository.default_branch);
+            core.setOutput("version_pattern", `version = "${tag.slice(1)}"`);
+            core.setOutput("readme_pattern", `rev = "${tag}"`);
 
-      - name: Checkout default branch
+      - name: Checkout tagged commit
         uses: actions/checkout@v4
         with:
-          ref: ${{ steps.meta.outputs.default_branch }}
+          ref: ${{ steps.meta.outputs.tag }}
 
-      - name: Sync versioned files
+      - name: Validate tagged files
         shell: bash
         run: |
-          VERSION="${{ steps.meta.outputs.version }}"
-          TAG="${{ steps.meta.outputs.tag }}"
+          VERSION_PATTERN="${{ steps.meta.outputs.version_pattern }}"
+          README_PATTERN="${{ steps.meta.outputs.readme_pattern }}"
 
           python - <<'PY'
           import os
           import pathlib
-          import re
 
-          version = os.environ["VERSION"]
-          tag = os.environ["TAG"]
+          version_pattern = os.environ["VERSION_PATTERN"]
+          readme_pattern = os.environ["README_PATTERN"]
 
           manifest_path = pathlib.Path("loom.config.luau")
           manifest = manifest_path.read_text()
-          manifest_updated, manifest_count = re.subn(r'version = "[^"]+"', f'version = "{version}"', manifest, count=1)
-
-          if manifest_count != 1:
-              raise SystemExit("Could not find package.version in loom.config.luau")
-
-          manifest_path.write_text(manifest_updated)
+          if version_pattern not in manifest:
+              raise SystemExit(
+                  f"Tagged commit is out of sync: expected {version_pattern!r} in {manifest_path}"
+              )
 
           readme_path = pathlib.Path("README.md")
           readme = readme_path.read_text()
-          readme_updated, readme_count = re.subn(r'rev = "v[^"]+"', f'rev = "{tag}"', readme, count=1)
-
-          if readme_count != 1:
-              raise SystemExit('Could not find README install example rev = "v..."')
-
-          readme_path.write_text(readme_updated)
+          if readme_pattern not in readme:
+              raise SystemExit(
+                  f'Tagged commit is out of sync: expected {readme_pattern!r} in {readme_path}'
+              )
           PY
         env:
-          VERSION: ${{ steps.meta.outputs.version }}
-          TAG: ${{ steps.meta.outputs.tag }}
-
-      - name: Commit synced version
-        shell: bash
-        run: |
-          if git diff --quiet -- loom.config.luau README.md; then
-            echo "versioned files already match release metadata"
-            exit 0
-          fi
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add loom.config.luau README.md
-          git commit -m "release: sync version to ${{ steps.meta.outputs.version }}"
-          git push origin HEAD:${{ steps.meta.outputs.default_branch }}
+          VERSION_PATTERN: ${{ steps.meta.outputs.version_pattern }}
+          README_PATTERN: ${{ steps.meta.outputs.readme_pattern }}
 
       - name: Generate release notes
         id: notes
