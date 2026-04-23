@@ -59,9 +59,11 @@ the parsed values to `process.env`, and returns the parsed table.
 - `expand`: expand `$VAR` and `${VAR}` style references
 - `strict`: error on invalid assignment lines
 - `env`: base environment table used during expansion
+- `override`: when loading multiple files, let later files replace earlier values
 
 `apply` and `config` support:
 
+- `path`: use a single path or an array of paths
 - `target`: environment table to write into
 - `override`: replace existing values instead of preserving them
 
@@ -72,6 +74,7 @@ See the [`examples`](./examples) directory for:
 - [`basic`](./examples/basic): load a sibling `.env` file and print values
 - [`config`](./examples/config): load environment variables into a small config table
 - [`functions`](./examples/functions): use `load`, `apply`, and `serialize` directly
+- [`multiple-files`](./examples/multiple-files): merge `.env` and `.env.local` in order
 
 ## License
 

@@ -6,6 +6,7 @@ local test = require("@std/test")
 
 local root = path.format(path.join(system.tmpdir(), "lute-dotenv-tests"))
 local envFile = path.join(root, ".env")
+local envLocalFile = path.join(root, ".env.local")
 
 test.suite("dotenv parsing", function(suite)
 	suite:case("parsesCommonAssignments", function(assert)
@@ -115,6 +116,31 @@ test.suite("dotenv file helpers", function(suite)
 		assert.eq(parsed.BIN, "/app/bin")
 	end)
 
+	suite:case("loadCanMergeMultipleFiles", function(assert)
+		fs.writeStringToFile(envFile, "HOST=example.com\nPORT=3000\nURL=http://${HOST}:${PORT}\n")
+		fs.writeStringToFile(envLocalFile, "PORT=4000\nDEBUG=true\n")
+
+		local parsed = dotenv.load({ envFile, envLocalFile }, {
+			expand = true,
+		})
+
+		assert.eq(parsed.HOST, "example.com")
+		assert.eq(parsed.PORT, "3000")
+		assert.eq(parsed.URL, "http://example.com:3000")
+		assert.eq(parsed.DEBUG, "true")
+	end)
+
+	suite:case("loadCanOverrideEarlierFiles", function(assert)
+		fs.writeStringToFile(envFile, "PORT=3000\n")
+		fs.writeStringToFile(envLocalFile, "PORT=4000\n")
+
+		local parsed = dotenv.load({ envFile, envLocalFile }, {
+			override = true,
+		})
+
+		assert.eq(parsed.PORT, "4000")
+	end)
+
 	suite:case("configAppliesWithoutOverridingByDefault", function(assert)
 		fs.writeStringToFile(envFile, "EXISTING=from-file\nNEW=value\n")
 
@@ -147,5 +173,21 @@ test.suite("dotenv file helpers", function(suite)
 		})
 
 		assert.eq(target.EXISTING, "from-file")
+	end)
+
+	suite:case("configCanReadMultipleFiles", function(assert)
+		fs.writeStringToFile(envFile, "APP_ENV=development\nPORT=3000\n")
+		fs.writeStringToFile(envLocalFile, "DEBUG=true\nPORT=4000\n")
+
+		local target: dotenv.Environment = {}
+		local parsed = dotenv.config({
+			path = { envFile, envLocalFile },
+			target = target,
+		})
+
+		assert.eq(parsed.APP_ENV, "development")
+		assert.eq(parsed.PORT, "3000")
+		assert.eq(parsed.DEBUG, "true")
+		assert.eq(target.PORT, "3000")
 	end)
 end)

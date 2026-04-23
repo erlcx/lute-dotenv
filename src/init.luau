@@ -9,6 +9,7 @@ local dotenv = {}
 
 export type Environment = { [string]: string }
 export type Pathlike = path.Pathlike
+export type PathInput = Pathlike | { Pathlike }
 
 export type ParseOptions = {
 	expand: boolean?,
@@ -21,10 +22,12 @@ export type ApplyOptions = {
 	override: boolean?,
 }
 
-export type LoadOptions = ParseOptions
+export type LoadOptions = ParseOptions & {
+	override: boolean?,
+}
 
 export type ConfigOptions = ParseOptions & ApplyOptions & {
-	path: Pathlike?,
+	path: PathInput?,
 }
 
 export type SerializeOptions = {
@@ -452,6 +455,28 @@ local function serializeValue(value: string): string
 	return '"' .. encodeDoubleQuoted(value) .. '"'
 end
 
+local function normalizePaths(input: PathInput): { Pathlike }
+	if type(input) == "table" and #input > 0 then
+		return input :: { Pathlike }
+	end
+
+	return { input :: Pathlike }
+end
+
+local function mergeValues(target: Environment, source: Environment, override: boolean): Environment
+	for name, value in source do
+		if override or target[name] == nil then
+			target[name] = value
+		end
+	end
+
+	return target
+end
+
+local function copyEnvironment(values: Environment): Environment
+	return table.clone(values)
+end
+
 function dotenv.parse(input: string, options: ParseOptions?): Environment
 	local entries = parseEntries(input, options)
 	local shouldExpand = if options and options.expand ~= nil then options.expand else false
@@ -482,22 +507,34 @@ function dotenv.serialize(values: Environment, options: SerializeOptions?): stri
 	return table.concat(lines, newline)
 end
 
-function dotenv.load(filepath: Pathlike, options: LoadOptions?): Environment
-	local contents = fs.readFileToString(filepath)
-	return dotenv.parse(contents, options)
+function dotenv.load(filepath: PathInput, options: LoadOptions?): Environment
+	local values: Environment = {}
+	local paths = normalizePaths(filepath)
+	local override = if options and options.override ~= nil then options.override else false
+	local baseEnv = if options and options.env then options.env else process.env
+
+	for _, currentPath in paths do
+		local expansionBase = copyEnvironment(baseEnv)
+		mergeValues(expansionBase, values, true)
+
+		local contents = fs.readFileToString(currentPath)
+		local parsed = dotenv.parse(contents, {
+			expand = if options then options.expand else nil,
+			strict = if options then options.strict else nil,
+			env = expansionBase,
+		})
+
+		mergeValues(values, parsed, override)
+	end
+
+	return values
 end
 
 function dotenv.apply(values: Environment, options: ApplyOptions?): Environment
 	local target = if options and options.target then options.target else process.env
 	local override = if options and options.override ~= nil then options.override else false
 
-	for name, value in values do
-		if override or target[name] == nil then
-			target[name] = value
-		end
-	end
-
-	return target
+	return mergeValues(target, values, override)
 end
 
 function dotenv.config(options: ConfigOptions?): Environment
