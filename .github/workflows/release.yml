@@ -1,24 +1,27 @@
-name: Release Metadata
+name: Publish Release
 
 on:
-  release:
-    types:
-      - published
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to publish (for example v0.1.0)
+        required: true
+        type: string
 
 permissions:
   contents: write
 
 jobs:
-  validate-and-update-notes:
+  publish:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Derive release metadata
+      - name: Derive publish metadata
         id: meta
         uses: actions/github-script@v7
         with:
           script: |
-            const tag = context.payload.release.tag_name;
+            const tag = context.payload.inputs.tag;
             if (!/^v\d+\.\d+\.\d+$/.test(tag)) {
               core.setFailed(`Release tag must look like vX.Y.Z, got ${tag}`);
               return;
@@ -26,78 +29,95 @@ jobs:
 
             core.setOutput("tag", tag);
             core.setOutput("version", tag.slice(1));
-            core.setOutput("version_pattern", `version = "${tag.slice(1)}"`);
-            core.setOutput("readme_pattern", `rev = "${tag}"`);
+            core.setOutput("default_branch", context.payload.repository.default_branch);
 
-      - name: Checkout tagged commit
+      - name: Checkout default branch
         uses: actions/checkout@v4
         with:
-          ref: ${{ steps.meta.outputs.tag }}
+          fetch-depth: 0
+          ref: ${{ steps.meta.outputs.default_branch }}
 
-      - name: Validate tagged files
+      - name: Sync versioned files
         shell: bash
         run: |
-          VERSION_PATTERN="${{ steps.meta.outputs.version_pattern }}"
-          README_PATTERN="${{ steps.meta.outputs.readme_pattern }}"
+          VERSION="${{ steps.meta.outputs.version }}"
+          TAG="${{ steps.meta.outputs.tag }}"
 
           python - <<'PY'
           import os
           import pathlib
+          import re
 
-          version_pattern = os.environ["VERSION_PATTERN"]
-          readme_pattern = os.environ["README_PATTERN"]
+          version = os.environ["VERSION"]
+          tag = os.environ["TAG"]
 
           manifest_path = pathlib.Path("loom.config.luau")
           manifest = manifest_path.read_text()
-          if version_pattern not in manifest:
-              raise SystemExit(
-                  f"Tagged commit is out of sync: expected {version_pattern!r} in {manifest_path}"
-              )
+          manifest_updated, manifest_count = re.subn(
+              r'version = "[^"]+"',
+              f'version = "{version}"',
+              manifest,
+              count=1,
+          )
+          if manifest_count != 1:
+              raise SystemExit("Could not find package.version in loom.config.luau")
+          manifest_path.write_text(manifest_updated)
 
           readme_path = pathlib.Path("README.md")
           readme = readme_path.read_text()
-          if readme_pattern not in readme:
-              raise SystemExit(
-                  f'Tagged commit is out of sync: expected {readme_pattern!r} in {readme_path}'
-              )
+          readme_updated, readme_count = re.subn(
+              r'rev = "v[^"]+"',
+              f'rev = "{tag}"',
+              readme,
+              count=1,
+          )
+          if readme_count != 1:
+              raise SystemExit('Could not find README install example rev = "v..."')
+          readme_path.write_text(readme_updated)
           PY
         env:
-          VERSION_PATTERN: ${{ steps.meta.outputs.version_pattern }}
-          README_PATTERN: ${{ steps.meta.outputs.readme_pattern }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          TAG: ${{ steps.meta.outputs.tag }}
 
-      - name: Generate release notes
-        id: notes
+      - name: Commit and push release prep
+        id: commit
+        shell: bash
+        run: |
+          if git diff --quiet -- loom.config.luau README.md; then
+            echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add loom.config.luau README.md
+          git commit -m "release: prepare ${{ steps.meta.outputs.tag }}"
+          git push origin HEAD:${{ steps.meta.outputs.default_branch }}
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Ensure tag does not already exist
+        shell: bash
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/${{ steps.meta.outputs.tag }}" >/dev/null 2>&1; then
+            echo "Tag ${{ steps.meta.outputs.tag }} already exists on origin" >&2
+            exit 1
+          fi
+
+      - name: Create and push tag
+        shell: bash
+        run: |
+          git tag "${{ steps.meta.outputs.tag }}" "${{ steps.commit.outputs.sha }}"
+          git push origin "${{ steps.meta.outputs.tag }}"
+
+      - name: Create GitHub release
         uses: actions/github-script@v7
         with:
           script: |
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            const release = context.payload.release;
-
-            const generated = await github.rest.repos.generateReleaseNotes({
-              owner,
-              repo,
-              tag_name: release.tag_name,
-              target_commitish: release.target_commitish || context.payload.repository.default_branch,
-            });
-
-            const existing = (release.body || "").trim();
-            const generatedBody = (generated.data.body || "").trim();
-            const body = existing.length > 0
-              ? `${existing}\n\n---\n\n${generatedBody}`
-              : generatedBody;
-
-            core.setOutput("body", body);
-
-      - name: Update release description
-        uses: actions/github-script@v7
-        env:
-          RELEASE_BODY: ${{ steps.notes.outputs.body }}
-        with:
-          script: |
-            await github.rest.repos.updateRelease({
+            await github.rest.repos.createRelease({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              release_id: context.payload.release.id,
-              body: process.env.RELEASE_BODY,
+              tag_name: "${{ steps.meta.outputs.tag }}",
+              name: "${{ steps.meta.outputs.tag }}",
+              target_commitish: "${{ steps.commit.outputs.sha }}",
+              generate_release_notes: true,
             });
