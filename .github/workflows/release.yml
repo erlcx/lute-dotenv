@@ -33,10 +33,11 @@ jobs:
         with:
           ref: ${{ steps.meta.outputs.default_branch }}
 
-      - name: Sync loom.config.luau version
+      - name: Sync versioned files
         shell: bash
         run: |
           VERSION="${{ steps.meta.outputs.version }}"
+          TAG="${{ steps.meta.outputs.tag }}"
 
           python - <<'PY'
           import os
@@ -44,29 +45,41 @@ jobs:
           import re
 
           version = os.environ["VERSION"]
-          path = pathlib.Path("loom.config.luau")
-          content = path.read_text()
-          updated, count = re.subn(r'version = "[^"]+"', f'version = "{version}"', content, count=1)
+          tag = os.environ["TAG"]
 
-          if count != 1:
+          manifest_path = pathlib.Path("loom.config.luau")
+          manifest = manifest_path.read_text()
+          manifest_updated, manifest_count = re.subn(r'version = "[^"]+"', f'version = "{version}"', manifest, count=1)
+
+          if manifest_count != 1:
               raise SystemExit("Could not find package.version in loom.config.luau")
 
-          path.write_text(updated)
+          manifest_path.write_text(manifest_updated)
+
+          readme_path = pathlib.Path("README.md")
+          readme = readme_path.read_text()
+          readme_updated, readme_count = re.subn(r'rev = "v[^"]+"', f'rev = "{tag}"', readme, count=1)
+
+          if readme_count != 1:
+              raise SystemExit('Could not find README install example rev = "v..."')
+
+          readme_path.write_text(readme_updated)
           PY
         env:
           VERSION: ${{ steps.meta.outputs.version }}
+          TAG: ${{ steps.meta.outputs.tag }}
 
       - name: Commit synced version
         shell: bash
         run: |
-          if git diff --quiet -- loom.config.luau; then
-            echo "loom.config.luau already matches release version"
+          if git diff --quiet -- loom.config.luau README.md; then
+            echo "versioned files already match release metadata"
             exit 0
           fi
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add loom.config.luau
+          git add loom.config.luau README.md
           git commit -m "release: sync version to ${{ steps.meta.outputs.version }}"
           git push origin HEAD:${{ steps.meta.outputs.default_branch }}
 

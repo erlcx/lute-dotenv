@@ -456,7 +456,12 @@ local function serializeValue(value: string): string
 end
 
 local function normalizePaths(input: PathInput): { Pathlike }
-	if type(input) == "table" and #input > 0 then
+	if type(input) ~= "table" then
+		return { input }
+	end
+
+	local candidate = input :: { [any]: any }
+	if candidate[1] ~= nil or next(candidate) == nil then
 		return input :: { Pathlike }
 	end
 

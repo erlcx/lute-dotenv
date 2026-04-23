@@ -21,7 +21,7 @@ return {
         ["test"] = "lute test",
         ["format"] = "stylua src tests examples",
         ["format:check"] = "stylua --check src tests examples",
-        ["ci"] = {"luu lint", "luu run lint:lute", "luu test","luu run format:check"},
+        ["ci"] = {"luu lint", "luu run lint:lute", "luu test", "luu run format:check"},
         ["gen:types"] = "lute setup --with-luaurc"
     }
 }
