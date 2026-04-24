@@ -14,8 +14,11 @@ return {
         ["lint:lute"] = "lute lint",
         ["lint"] = "selene src tests examples",
         ["test"] = "lute test",
-        ["format"] = "stylua src tests examples",
-        ["format:check"] = "stylua --check src tests examples",
+        ["format"] = "stylua src tests examples benchmarks",
+        ["format:check"] = "stylua --check src tests examples benchmarks",
+        ["bench:luau"] = "lute benchmarks/luau-dotenv.luau",
+        ["bench:js"] = "npm --prefix benchmarks run bench --silent",
+        ["bench"] = {"luu run bench:luau", "luu run bench:js"},
         ["ci"] = {"luu lint", "luu run lint:lute", "luu test", "luu run format:check"},
         ["types"] = "lute setup"
     },

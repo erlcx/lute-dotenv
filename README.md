@@ -76,6 +76,19 @@ See the [`examples`](./examples) directory for:
 - [`functions`](./examples/functions): use `load`, `apply`, and `serialize` directly
 - [`multiple-files`](./examples/multiple-files): merge `.env` and `.env.local` in order
 
+## Benchmarks
+
+Parse-only benchmarks live in [`benchmarks`](./benchmarks). They compare this
+package against the JavaScript `dotenv` package using equivalent generated
+fixtures and no file I/O.
+
+```sh
+npm --prefix benchmarks install
+luu run bench
+```
+
+Run one side at a time with `luu run bench:luau` or `luu run bench:js`.
+
 ## License
 
 This project is licensed under the MIT License. See the [LICENSE](./LICENSE) file for details.

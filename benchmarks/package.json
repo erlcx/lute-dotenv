@@ -1,0 +1,10 @@
+{
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "bench": "node js-dotenv.mjs"
+  },
+  "dependencies": {
+    "dotenv": "17.4.2"
+  }
+}
