@@ -63,104 +63,94 @@ end
 
 local function splitLines(input: string): { string }
 	local lines = {}
-	for line in string.gmatch(input .. "\n", "(.-)\n") do
-		table.insert(lines, line)
+	local start = 1
+
+	while true do
+		local newline = string.find(input, "\n", start, true)
+		if not newline then
+			break
+		end
+
+		lines[#lines + 1] = string.sub(input, start, newline - 1)
+		start = newline + 1
 	end
+
+	if start <= #input then
+		lines[#lines + 1] = string.sub(input, start)
+	else
+		lines[#lines + 1] = ""
+	end
+
 	return lines
 end
 
 local function decodeDoubleQuoted(contents: string): string
-	local out = {}
-	local index = 1
-
-	while index <= #contents do
-		local ch = string.sub(contents, index, index)
-		if ch ~= "\\" then
-			table.insert(out, ch)
-			index += 1
-			continue
-		end
-
-		if index == #contents then
-			table.insert(out, "\\")
-			break
-		end
-
-		local nextCh = string.sub(contents, index + 1, index + 1)
-		if nextCh == "n" then
-			table.insert(out, "\n")
-		elseif nextCh == "r" then
-			table.insert(out, "\r")
-		elseif nextCh == "t" then
-			table.insert(out, "\t")
-		elseif nextCh == '"' then
-			table.insert(out, '"')
-		elseif nextCh == "\\" then
-			table.insert(out, "\\")
-		elseif nextCh == "$" then
-			table.insert(out, DOLLAR_SENTINEL)
-		else
-			table.insert(out, "\\")
-			table.insert(out, nextCh)
-		end
-
-		index += 2
+	if not string.find(contents, "\\", 1, true) then
+		return contents
 	end
 
-	return table.concat(out)
+	return (
+		string.gsub(contents, "\\(.)", function(nextCh: string): string
+			if nextCh == "n" then
+				return "\n"
+			elseif nextCh == "r" then
+				return "\r"
+			elseif nextCh == "t" then
+				return "\t"
+			elseif nextCh == '"' then
+				return '"'
+			elseif nextCh == "\\" then
+				return "\\"
+			elseif nextCh == "$" then
+				return DOLLAR_SENTINEL
+			end
+
+			return "\\" .. nextCh
+		end)
+	)
 end
 
 local function decodeSingleQuoted(contents: string): string
-	local out = {}
-	local index = 1
-
-	while index <= #contents do
-		local ch = string.sub(contents, index, index)
-		if ch == "\\" and index < #contents then
-			local nextCh = string.sub(contents, index + 1, index + 1)
-			if nextCh == "'" or nextCh == "\\" then
-				table.insert(out, nextCh)
-				index += 2
-				continue
-			end
-		end
-
-		table.insert(out, ch)
-		index += 1
+	if not string.find(contents, "\\", 1, true) then
+		return contents
 	end
 
-	return table.concat(out)
+	return (string.gsub(contents, "\\(['\\])", "%1"))
 end
 
 local function parseUnquoted(rawValue: string): string
-	local value = {}
-	local index = 1
+	local commentIndex: number? = nil
+	local searchIndex = 1
 
-	while index <= #rawValue do
-		local ch = string.sub(rawValue, index, index)
-		if ch == "#" then
-			local prev = if index > 1 then string.sub(rawValue, index - 1, index - 1) else ""
-			if index == 1 or prev == " " or prev == "\t" then
-				break
-			end
-		elseif ch == "\\" and index < #rawValue then
-			local nextCh = string.sub(rawValue, index + 1, index + 1)
-			if nextCh == "#" then
-				table.insert(value, "#")
-				index += 2
-				continue
-			elseif nextCh == "$" then
-				table.insert(value, DOLLAR_SENTINEL)
-				index += 2
-				continue
-			end
+	while true do
+		local index = string.find(rawValue, "#", searchIndex, true)
+		if not index then
+			break
 		end
 
-		table.insert(value, ch)
-		index += 1
+		local prev = if index > 1 then string.sub(rawValue, index - 1, index - 1) else ""
+		if index == 1 or prev == " " or prev == "\t" then
+			commentIndex = index
+			break
+		end
+
+		searchIndex = index + 1
 	end
 
-	return trim(table.concat(value))
+	local value = if commentIndex then string.sub(rawValue, 1, commentIndex - 1) else rawValue
+	value = trim(value)
+
+	if string.find(value, "\\", 1, true) then
+		value = string.gsub(value, "\\([#$])", function(escaped: string): string
+			if escaped == "$" then
+				return DOLLAR_SENTINEL
+			end
+
+			return escaped
+		end)
+	end
+
+	return value
 end
 
 local function isEscaped(value: string, index: number): boolean
@@ -182,21 +172,25 @@ local function parseQuotedValue(
 	local segments = {}
 	local currentLineIndex = lineIndex
 	local current = string.sub(rawValue, 2)
+	local quoteChar = if quote == "single" then "'" else '"'
 
 	while true do
-		local index = 1
-		while index <= #current do
-			local ch = string.sub(current, index, index)
-			local escaped = isEscaped(current, index)
-			if ch == (if quote == "single" then "'" else '"') and not escaped then
-				table.insert(segments, string.sub(current, 1, index - 1))
+		local searchIndex = 1
+		while true do
+			local index = string.find(current, quoteChar, searchIndex, true)
+			if not index then
+				break
+			end
+
+			if not isEscaped(current, index) then
+				segments[#segments + 1] = string.sub(current, 1, index - 1)
 
 				local trailing = string.sub(current, index + 1)
 				if trailing ~= "" and not string.match(trailing, "^%s*$") and not string.match(trailing, "^%s*#") then
 					error(`invalid trailing characters after quoted value on line {lineIndex}`)
 				end
 
-				local joined = table.concat(segments, "\n")
+				local joined = if #segments == 1 then segments[1] else table.concat(segments, "\n")
 				if quote == "single" then
 					return decodeSingleQuoted(joined), currentLineIndex
 				else
@@ -204,10 +198,10 @@ local function parseQuotedValue(
 				end
 			end
 
-			index += 1
+			searchIndex = index + 1
 		end
 
-		table.insert(segments, current)
+		segments[#segments + 1] = current
 		currentLineIndex += 1
 		if currentLineIndex > #lines then
 			error(`unterminated quoted value starting on line {lineIndex}`)
@@ -225,9 +219,9 @@ local function parseEntries(input: string, options: ParseOptions?): { [string]: 
 	local lineIndex = 1
 	while lineIndex <= #lines do
 		local line = lines[lineIndex]
-		local stripped = string.match(line, "^%s*(.-)%s*$") or ""
+		local firstNonWhitespace = string.find(line, "%S")
 
-		if stripped == "" or string.sub(stripped, 1, 1) == "#" then
+		if not firstNonWhitespace or string.sub(line, firstNonWhitespace, firstNonWhitespace) == "#" then
 			lineIndex += 1
 			continue
 		end
@@ -428,7 +422,11 @@ end
 local function rawEntriesToEnvironment(entries: { [string]: Entry }): Environment
 	local values = {}
 	for name, entry in entries do
-		values[name] = string.gsub(entry.value, DOLLAR_SENTINEL, "$")
+		if string.find(entry.value, DOLLAR_SENTINEL, 1, true) then
+			values[name] = string.gsub(entry.value, DOLLAR_SENTINEL, "$")
+		else
+			values[name] = entry.value
+		end
 	end
 	return values
 end

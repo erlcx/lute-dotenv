@@ -89,6 +89,14 @@ luu run bench
 
 Run one side at a time with `luu run bench:luau` or `luu run bench:js`.
 
+Latest local parse benchmark, run on April 24, 2026:
+
+| Fixture | lute-dotenv | JS dotenv | Comparison |
+| --- | ---: | ---: | --- |
+| `basic-128` | 4,403 ops/s | 13,539 ops/s | JS dotenv is 3.08x faster |
+| `quoted-128` | 919 ops/s | 2,319 ops/s | JS dotenv is 2.52x faster |
+| `mixed-128` | 970 ops/s | 3,191 ops/s | JS dotenv is 3.29x faster |
+
 ## License
 
 This project is licensed under the MIT License. See the [LICENSE](./LICENSE) file for details.
