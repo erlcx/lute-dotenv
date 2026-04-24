@@ -18,7 +18,7 @@ return {
             dotenv = {
                 sourceKind = "github",
                 source = "https://github.com/erlcx/lute-dotenv",
-                rev = "v0.1.0",
+                rev = "v0.1.1",
             },
         },
     },
