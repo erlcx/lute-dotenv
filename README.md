@@ -94,8 +94,8 @@ Latest local parse benchmark, run on April 25, 2026:
 | Fixture | lute-dotenv | JS dotenv | Comparison |
 | --- | ---: | ---: | --- |
 | `basic-128` | 5,530 ops/s | 13,332 ops/s | JS dotenv is 2.41x faster |
-| `quoted-128` | 1,220 ops/s | 2,334 ops/s | JS dotenv is 1.91x faster |
-| `mixed-128` | 1,445 ops/s | 3,201 ops/s | JS dotenv is 2.22x faster |
+| `quoted-128` | 1,276 ops/s | 2,274 ops/s | JS dotenv is 1.78x faster |
+| `mixed-128` | 1,442 ops/s | 3,172 ops/s | JS dotenv is 2.20x faster |
 
 ## License
 

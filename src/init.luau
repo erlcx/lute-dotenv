@@ -272,9 +272,13 @@ local function parseAssignment(line: string): (string?, string?)
 end
 
 local function isEscaped(value: string, index: number): boolean
+	if index <= 1 or string.byte(value, index - 1) ~= 92 then
+		return false
+	end
+
 	local backslashes = 0
 	local scan = index - 1
-	while scan >= 1 and string.sub(value, scan, scan) == "\\" do
+	while scan >= 1 and string.byte(value, scan) == 92 do
 		backslashes += 1
 		scan -= 1
 	end
@@ -303,9 +307,11 @@ local function parseQuotedValue(
 			if not isEscaped(current, index) then
 				local contents = string.sub(current, 1, index - 1)
 
-				local trailing = string.sub(current, index + 1)
-				if trailing ~= "" and isTrailingQuoteJunk(trailing) then
-					error(`invalid trailing characters after quoted value on line {lineIndex}`)
+				if index < #current then
+					local trailing = string.sub(current, index + 1)
+					if isTrailingQuoteJunk(trailing) then
+						error(`invalid trailing characters after quoted value on line {lineIndex}`)
+					end
 				end
 
 				local joined: string
