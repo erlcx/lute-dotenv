@@ -47,12 +47,38 @@ local UTF8_BOM = string.char(239, 187, 191)
 local DOLLAR_SENTINEL = "\0"
 
 local function trim(value: string): string
-	return (string.match(value, "^%s*(.-)%s*$") or "")
+	local start = 1
+	local finish = #value
+
+	while start <= finish do
+		local byte = string.byte(value, start)
+		if byte ~= 32 and byte ~= 9 and byte ~= 10 and byte ~= 13 and byte ~= 11 and byte ~= 12 then
+			break
+		end
+		start += 1
+	end
+
+	while finish >= start do
+		local byte = string.byte(value, finish)
+		if byte ~= 32 and byte ~= 9 and byte ~= 10 and byte ~= 13 and byte ~= 11 and byte ~= 12 then
+			break
+		end
+		finish -= 1
+	end
+
+	if start == 1 and finish == #value then
+		return value
+	end
+
+	return string.sub(value, start, finish)
 end
 
 local function normalizeInput(input: string): string
-	local normalized = string.gsub(input, "\r\n", "\n")
-	normalized = string.gsub(normalized, "\r", "\n")
+	local normalized = input
+	if string.find(normalized, "\r", 1, true) then
+		normalized = string.gsub(normalized, "\r\n", "\n")
+		normalized = string.gsub(normalized, "\r", "\n")
+	end
 
 	if string.sub(normalized, 1, #UTF8_BOM) == UTF8_BOM then
 		normalized = string.sub(normalized, #UTF8_BOM + 1)
@@ -153,6 +179,98 @@ local function parseUnquoted(rawValue: string): string
 	return value
 end
 
+local function isSpaceByte(byte: number?): boolean
+	return byte == 32 or byte == 9 or byte == 10 or byte == 13 or byte == 11 or byte == 12
+end
+
+local function isAlphaByte(byte: number?): boolean
+	return (byte ~= nil and byte >= 65 and byte <= 90) or (byte ~= nil and byte >= 97 and byte <= 122)
+end
+
+local function isDigitByte(byte: number?): boolean
+	return byte ~= nil and byte >= 48 and byte <= 57
+end
+
+local function isNameStartByte(byte: number?): boolean
+	return byte == 95 or isAlphaByte(byte)
+end
+
+local function isNameByte(byte: number?): boolean
+	return byte == 95 or isAlphaByte(byte) or isDigitByte(byte)
+end
+
+local function isBlankOrComment(line: string): boolean
+	local length = #line
+	local index = 1
+
+	while index <= length do
+		local byte = string.byte(line, index)
+		if not isSpaceByte(byte) then
+			return byte == 35
+		end
+		index += 1
+	end
+
+	return true
+end
+
+local function isTrailingQuoteJunk(trailing: string): boolean
+	for index = 1, #trailing do
+		local byte = string.byte(trailing, index)
+		if byte == 35 then
+			return false
+		end
+		if not isSpaceByte(byte) then
+			return true
+		end
+	end
+
+	return false
+end
+
+local function parseAssignment(line: string): (string?, string?)
+	local length = #line
+	local index = 1
+
+	while index <= length and isSpaceByte(string.byte(line, index)) do
+		index += 1
+	end
+
+	if string.sub(line, index, index + 5) == "export" and isSpaceByte(string.byte(line, index + 6)) then
+		index += 7
+		while index <= length and isSpaceByte(string.byte(line, index)) do
+			index += 1
+		end
+	end
+
+	local keyStart = index
+	if not isNameStartByte(string.byte(line, index)) then
+		return nil, nil
+	end
+
+	index += 1
+	while index <= length and isNameByte(string.byte(line, index)) do
+		index += 1
+	end
+
+	local key = string.sub(line, keyStart, index - 1)
+
+	while index <= length and isSpaceByte(string.byte(line, index)) do
+		index += 1
+	end
+
+	if string.byte(line, index) ~= 61 then
+		return nil, nil
+	end
+
+	index += 1
+	while index <= length and isSpaceByte(string.byte(line, index)) do
+		index += 1
+	end
+
+	return key, string.sub(line, index)
+end
+
 local function isEscaped(value: string, index: number): boolean
 	local backslashes = 0
 	local scan = index - 1
@@ -169,7 +287,7 @@ local function parseQuotedValue(
 	rawValue: string,
 	quote: QuoteKind
 ): (string, number)
-	local segments = {}
+	local segments: { string }? = nil
 	local currentLineIndex = lineIndex
 	local current = string.sub(rawValue, 2)
 	local quoteChar = if quote == "single" then "'" else '"'
@@ -183,14 +301,21 @@ local function parseQuotedValue(
 			end
 
 			if not isEscaped(current, index) then
-				segments[#segments + 1] = string.sub(current, 1, index - 1)
+				local contents = string.sub(current, 1, index - 1)
 
 				local trailing = string.sub(current, index + 1)
-				if trailing ~= "" and not string.match(trailing, "^%s*$") and not string.match(trailing, "^%s*#") then
+				if trailing ~= "" and isTrailingQuoteJunk(trailing) then
 					error(`invalid trailing characters after quoted value on line {lineIndex}`)
 				end
 
-				local joined = if #segments == 1 then segments[1] else table.concat(segments, "\n")
+				local joined: string
+				if segments then
+					segments[#segments + 1] = contents
+					joined = table.concat(segments, "\n")
+				else
+					joined = contents
+				end
+
 				if quote == "single" then
 					return decodeSingleQuoted(joined), currentLineIndex
 				else
@@ -201,7 +326,12 @@ local function parseQuotedValue(
 			searchIndex = index + 1
 		end
 
-		segments[#segments + 1] = current
+		if not segments then
+			segments = {}
+		end
+
+		local currentSegments = segments :: { string }
+		currentSegments[#currentSegments + 1] = current
 		currentLineIndex += 1
 		if currentLineIndex > #lines then
 			error(`unterminated quoted value starting on line {lineIndex}`)
@@ -219,19 +349,13 @@ local function parseEntries(input: string, options: ParseOptions?): { [string]: 
 	local lineIndex = 1
 	while lineIndex <= #lines do
 		local line = lines[lineIndex]
-		local firstNonWhitespace = string.find(line, "%S")
 
-		if not firstNonWhitespace or string.sub(line, firstNonWhitespace, firstNonWhitespace) == "#" then
+		if isBlankOrComment(line) then
 			lineIndex += 1
 			continue
 		end
 
-		local content = line
-		if string.match(content, "^%s*export%s+") then
-			content = string.gsub(content, "^(%s*)export%s+", "%1", 1)
-		end
-
-		local key, rawValue = string.match(content, "^%s*([%a_][%w_]*)%s*=%s*(.*)$")
+		local key, rawValue = parseAssignment(line)
 		if not key then
 			if strict then
 				error(`invalid .env assignment on line {lineIndex}`)
@@ -264,6 +388,53 @@ local function parseEntries(input: string, options: ParseOptions?): { [string]: 
 	end
 
 	return entries
+end
+
+local function parseEnvironment(input: string, options: ParseOptions?): Environment
+	local strict = if options and options.strict ~= nil then options.strict else true
+	local normalized = normalizeInput(input)
+	local lines = splitLines(normalized)
+	local values: Environment = {}
+
+	local lineIndex = 1
+	while lineIndex <= #lines do
+		local line = lines[lineIndex]
+
+		if isBlankOrComment(line) then
+			lineIndex += 1
+			continue
+		end
+
+		local key, rawValue = parseAssignment(line)
+		if not key then
+			if strict then
+				error(`invalid .env assignment on line {lineIndex}`)
+			end
+			lineIndex += 1
+			continue
+		end
+		assert(rawValue ~= nil, "internal error: expected assignment value capture")
+
+		local value: string
+		local firstChar = string.sub(rawValue, 1, 1)
+		if firstChar == '"' then
+			value, lineIndex = parseQuotedValue(lines, lineIndex, rawValue, "double")
+		elseif firstChar == "'" then
+			value, lineIndex = parseQuotedValue(lines, lineIndex, rawValue, "single")
+		else
+			value = parseUnquoted(rawValue)
+		end
+
+		if string.find(value, DOLLAR_SENTINEL, 1, true) then
+			value = string.gsub(value, DOLLAR_SENTINEL, "$")
+		end
+
+		values[key] = value
+
+		lineIndex += 1
+	end
+
+	return values
 end
 
 local function parseExpansionExpression(expression: string): (string, string?, string?)
@@ -419,18 +590,6 @@ local function expandEntries(entries: { [string]: Entry }, baseEnv: Environment)
 	return resolved
 end
 
-local function rawEntriesToEnvironment(entries: { [string]: Entry }): Environment
-	local values = {}
-	for name, entry in entries do
-		if string.find(entry.value, DOLLAR_SENTINEL, 1, true) then
-			values[name] = string.gsub(entry.value, DOLLAR_SENTINEL, "$")
-		else
-			values[name] = entry.value
-		end
-	end
-	return values
-end
-
 local function encodeDoubleQuoted(value: string): string
 	value = string.gsub(value, "\\", "\\\\")
 	value = string.gsub(value, "\n", "\\n")
@@ -481,12 +640,12 @@ local function copyEnvironment(values: Environment): Environment
 end
 
 function dotenv.parse(input: string, options: ParseOptions?): Environment
-	local entries = parseEntries(input, options)
 	local shouldExpand = if options and options.expand ~= nil then options.expand else false
 	if not shouldExpand then
-		return rawEntriesToEnvironment(entries)
+		return parseEnvironment(input, options)
 	end
 
+	local entries = parseEntries(input, options)
 	local baseEnv = if options and options.env then options.env else process.env
 	return expandEntries(entries, baseEnv)
 end

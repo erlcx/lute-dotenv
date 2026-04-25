@@ -18,7 +18,7 @@ return {
             dotenv = {
                 sourceKind = "github",
                 source = "https://github.com/erlcx/lute-dotenv",
-                rev = "v0.1.1",
+                rev = "v0.1.2",
             },
         },
     },
@@ -89,13 +89,13 @@ luu run bench
 
 Run one side at a time with `luu run bench:luau` or `luu run bench:js`.
 
-Latest local parse benchmark, run on April 24, 2026:
+Latest local parse benchmark, run on April 25, 2026:
 
 | Fixture | lute-dotenv | JS dotenv | Comparison |
 | --- | ---: | ---: | --- |
-| `basic-128` | 4,403 ops/s | 13,539 ops/s | JS dotenv is 3.08x faster |
-| `quoted-128` | 919 ops/s | 2,319 ops/s | JS dotenv is 2.52x faster |
-| `mixed-128` | 970 ops/s | 3,191 ops/s | JS dotenv is 3.29x faster |
+| `basic-128` | 5,530 ops/s | 13,332 ops/s | JS dotenv is 2.41x faster |
+| `quoted-128` | 1,220 ops/s | 2,334 ops/s | JS dotenv is 1.91x faster |
+| `mixed-128` | 1,445 ops/s | 3,201 ops/s | JS dotenv is 2.22x faster |
 
 ## License
 

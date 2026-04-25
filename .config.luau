@@ -4,7 +4,7 @@
 return {
     package = {
         name = "lute-dotenv",
-        version = "0.1.1",
+        version = "0.1.2",
         description = "A dotenv-style package for Luau projects running on Lute.",
         author = "erlcx",
         license = "MIT"
